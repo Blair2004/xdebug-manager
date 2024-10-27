@@ -115,7 +115,7 @@ set_start_with_request() {
 # Restart PHP-FPM service
 restart_fpm() {
     local php_version=$1
-    sudo systemctl restart php${php_version}-fpm
+    sudo service php${php_version}-fpm restart
 }
 
 # Parse command-line arguments
