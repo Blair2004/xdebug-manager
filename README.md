@@ -5,6 +5,9 @@ You can use it to:
 - change mode
 - change port
 
+# Installation
+You might install this file within /usr/local/bin on ubuntu and make it executable using `chmod +x /usr/local/bin/xdebug`. You can rename the executable to anything else than "xdebug".
+
 # Available Commands
 
 ```
