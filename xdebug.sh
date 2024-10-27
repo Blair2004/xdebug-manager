@@ -1,5 +1,28 @@
 #!/bin/bash
 
+# Display help function
+show_help() {
+    echo "Usage: xdebug [OPTIONS]"
+    echo ""
+    echo "A script to toggle Xdebug configuration for different PHP versions and settings."
+    echo ""
+    echo "Options:"
+    echo "  --php <version>             Specify the PHP version (e.g., 7.4, 8.0, 8.3)"
+    echo "  --enable                    Enable Xdebug for the specified PHP version"
+    echo "  --disable                   Disable Xdebug for the specified PHP version"
+    echo "  --mode <mode>               Set the Xdebug mode (e.g., debug, coverage)"
+    echo "  --port <port>               Set the Xdebug port (e.g., 9003)"
+    echo "  --start-with-request <yes|no> Set whether Xdebug should start with the request"
+    echo "  --help                      Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  xdebug --enable --php 8.3 --mode debug"
+    echo "  xdebug --disable --php 7.4"
+    echo "  xdebug --php 8.3 --start-with-request no"
+    echo "  xdebug --php 8.3 --port 9003"
+    exit 0
+}
+
 # Check for the presence of Xdebug config files
 get_xdebug_config_file() {
     local php_version=$1
@@ -89,11 +112,18 @@ set_start_with_request() {
     fi
 }
 
+# Restart PHP-FPM service
+restart_fpm() {
+    local php_version=$1
+    sudo systemctl restart php${php_version}-fpm
+}
+
 # Parse command-line arguments
 php_version=""
 mode=""
 port=""
 start_with_request=""
+action=""
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -103,7 +133,8 @@ while [[ "$#" -gt 0 ]]; do
         --disable) action="disable";;
         --port) port="$2"; shift ;;
         --start-with-request) start_with_request="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+        --help) show_help ;;
+        *) echo "Unknown parameter: $1"; show_help ;;
     esac
     shift
 done
@@ -120,3 +151,6 @@ case $action in
        if [ ! -z "$port" ]; then set_port $php_version $port; fi
        if [ ! -z "$start_with_request" ]; then set_start_with_request $php_version $start_with_request; fi ;;
 esac
+
+# Restart PHP-FPM service
+restart_fpm $php_version
