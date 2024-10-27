@@ -1,108 +1,122 @@
 #!/bin/bash
 
-# Function to get available PHP versions
-get_php_versions() {
-    update-alternatives --list php | grep -oP '\d\.\d+' | sort -u
-}
-
-# Function to toggle Xdebug for a specific PHP version
-toggle_xdebug_for_version() {
-    PHP_VERSION=$1
-    ACTION=$2
-    XDEBUG_MODE=$3
-    CLIENT_PORT=$4
-
-    INI_FILE="/etc/php/${PHP_VERSION}/mods-available/xdebug.ini"
-    
-    if [ ! -f "$INI_FILE" ]; then
-        echo "Xdebug is not installed for PHP version $PHP_VERSION"
-        return
-    fi
-
-    if [[ "$ACTION" == "enable" ]]; then
-        echo "Enabling Xdebug for PHP $PHP_VERSION..."
-        sudo sed -i '/;zend_extension=xdebug/s/^;//g' "$INI_FILE"
-    elif [[ "$ACTION" == "disable" ]]; then
-        # Check if Xdebug is already disabled
-        if grep -q '^;zend_extension=xdebug' "$INI_FILE"; then
-            echo "Xdebug is already disabled for PHP $PHP_VERSION."
-        else
-            echo "Disabling Xdebug for PHP $PHP_VERSION..."
-            sudo sed -i '/zend_extension=xdebug/s/^/;/g' "$INI_FILE"
-        fi
-    fi
-
-    if [ -n "$XDEBUG_MODE" ]; then
-        echo "Setting Xdebug mode to $XDEBUG_MODE for PHP $PHP_VERSION..."
-        sudo sed -i "s/^xdebug.mode=.*/xdebug.mode=$XDEBUG_MODE/" "$INI_FILE"
-    fi
-
-    if [ -n "$CLIENT_PORT" ]; then
-        echo "Setting Xdebug client_port to $CLIENT_PORT for PHP $PHP_VERSION..."
-        if grep -q '^xdebug.client_port=' "$INI_FILE"; then
-            sudo sed -i "s/^xdebug.client_port=.*/xdebug.client_port=$CLIENT_PORT/" "$INI_FILE"
-        else
-            echo "xdebug.client_port=$CLIENT_PORT" | sudo tee -a "$INI_FILE" > /dev/null
-        fi
-    fi
-
-    echo "Restarting PHP $PHP_VERSION-FPM service..."
-    sudo service php${PHP_VERSION}-fpm restart
-}
-
-# Function to show help message
-show_help() {
-    echo "Usage: xdebug [options]"
-    echo ""
-    echo "Options:"
-    echo "  --enable                 Enable Xdebug"
-    echo "  --disable                Disable Xdebug"
-    echo "  --mode <mode>            Set the Xdebug mode (e.g., debug, coverage)"
-    echo "  --php <version>          Specify the PHP version (e.g., 7.4, 8.3)"
-    echo "  --port <client_port>     Set the Xdebug client port (e.g., 9003)"
-    echo ""
-    echo "Examples:"
-    echo "  xdebug --enable --php 7.4"
-    echo "  xdebug --disable --php 8.3"
-    echo "  xdebug --mode debug"
-    echo "  xdebug --enable --mode coverage --php 8.3"
-    echo "  xdebug --port 9003 --php 7.4"
-    echo ""
-}
-
-# Function to parse command line arguments
-main() {
-    ACTION=""
-    XDEBUG_MODE=""
-    PHP_VERSION=""
-    CLIENT_PORT=""
-
-    if [[ "$#" -eq 0 ]]; then
-        show_help
+# Check for the presence of Xdebug config files
+get_xdebug_config_file() {
+    local php_version=$1
+    local ini_file
+    if [ -f "/etc/php/${php_version}/mods-available/xdebug.ini" ]; then
+        ini_file="/etc/php/${php_version}/mods-available/xdebug.ini"
+    elif [ -f "/etc/php/${php_version}/mods-available/20-xdebug.ini" ]; then
+        ini_file="/etc/php/${php_version}/mods-available/20-xdebug.ini"
+    else
+        echo "Xdebug is not installed or configuration file not found for PHP ${php_version}"
         exit 1
     fi
+    echo $ini_file
+}
 
-    while [[ "$#" -gt 0 ]]; do
-        case $1 in
-            --enable) ACTION="enable" ;;
-            --disable) ACTION="disable" ;;
-            --mode) XDEBUG_MODE="$2"; shift ;;
-            --php) PHP_VERSION="$2"; shift ;;
-            --port) CLIENT_PORT="$2"; shift ;;
-            *) echo "Unknown parameter: $1"; show_help; exit 1 ;;
-        esac
-        shift
-    done
+# Enable Xdebug
+enable_xdebug() {
+    local php_version=$1
+    local mode=$2
+    local ini_file=$(get_xdebug_config_file $php_version)
 
-    if [ -z "$PHP_VERSION" ]; then
-        echo "No PHP version specified. Toggling Xdebug for all PHP versions."
-        for VERSION in $(get_php_versions); do
-            toggle_xdebug_for_version "$VERSION" "$ACTION" "$XDEBUG_MODE" "$CLIENT_PORT"
-        done
+    # Check if Xdebug is already enabled
+    if grep -q "^;zend_extension=xdebug.so" "$ini_file"; then
+        sed -i 's/^;zend_extension/zend_extension/' "$ini_file"
     else
-        toggle_xdebug_for_version "$PHP_VERSION" "$ACTION" "$XDEBUG_MODE" "$CLIENT_PORT"
+        echo "Xdebug is already enabled for PHP ${php_version}"
+    fi
+
+    if [ ! -z "$mode" ]; then
+        if grep -q "^xdebug.mode=" "$ini_file"; then
+            sed -i "s/^xdebug.mode=.*/xdebug.mode=${mode}/" "$ini_file"
+        else
+            echo "xdebug.mode=${mode}" >> "$ini_file"
+        fi
     fi
 }
 
-# Execute the main function
-main "$@"
+# Disable Xdebug
+disable_xdebug() {
+    local php_version=$1
+    local ini_file=$(get_xdebug_config_file $php_version)
+
+    # Check if Xdebug is already disabled
+    if grep -q "^zend_extension=xdebug.so" "$ini_file"; then
+        sed -i 's/^zend_extension/;zend_extension/' "$ini_file"
+    else
+        echo "Xdebug is already disabled for PHP ${php_version}"
+    fi
+}
+
+# Change the Xdebug mode
+change_mode() {
+    local php_version=$1
+    local mode=$2
+    local ini_file=$(get_xdebug_config_file $php_version)
+
+    if grep -q "^xdebug.mode=" "$ini_file"; then
+        sed -i "s/^xdebug.mode=.*/xdebug.mode=${mode}/" "$ini_file"
+    else
+        echo "xdebug.mode=${mode}" >> "$ini_file"
+    fi
+}
+
+# Set the Xdebug port
+set_port() {
+    local php_version=$1
+    local port=$2
+    local ini_file=$(get_xdebug_config_file $php_version)
+
+    if grep -q "^xdebug.client_port=" "$ini_file"; then
+        sed -i "s/^xdebug.client_port=.*/xdebug.client_port=${port}/" "$ini_file"
+    else
+        echo "xdebug.client_port=${port}" >> "$ini_file"
+    fi
+}
+
+# Set the Xdebug start_with_request option
+set_start_with_request() {
+    local php_version=$1
+    local value=$2
+    local ini_file=$(get_xdebug_config_file $php_version)
+
+    if grep -q "^xdebug.start_with_request=" "$ini_file"; then
+        sed -i "s/^xdebug.start_with_request=.*/xdebug.start_with_request=${value}/" "$ini_file"
+    else
+        echo "xdebug.start_with_request=${value}" >> "$ini_file"
+    fi
+}
+
+# Parse command-line arguments
+php_version=""
+mode=""
+port=""
+start_with_request=""
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --php) php_version="$2"; shift ;;
+        --mode) mode="$2"; shift ;;
+        --enable) action="enable";;
+        --disable) action="disable";;
+        --port) port="$2"; shift ;;
+        --start-with-request) start_with_request="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+if [ -z "$php_version" ]; then
+    echo "Please specify a PHP version with --php"
+    exit 1
+fi
+
+case $action in
+    enable) enable_xdebug $php_version $mode ;;
+    disable) disable_xdebug $php_version ;;
+    *) if [ ! -z "$mode" ]; then change_mode $php_version $mode; fi
+       if [ ! -z "$port" ]; then set_port $php_version $port; fi
+       if [ ! -z "$start_with_request" ]; then set_start_with_request $php_version $start_with_request; fi ;;
+esac
